@@ -11,12 +11,14 @@
 #     express or implied. See the License for the specific language governing
 #     permissions and limitations under the License.
 
-import requests
-from datetime import datetime
-import getopt, sys
-import urllib3
-import boto3
+import getopt
 import json
+import sys
+from datetime import datetime
+
+import boto3
+import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -42,7 +44,7 @@ idle = True
 port = '8443'
 ignore_connections = False
 try:
-    opts, args = getopt.getopt(sys.argv[1:], "ht:p:c", ["help","time=","port=","ignore-connections"])
+    opts, args = getopt.getopt(sys.argv[1:], "ht:p:c", ["help", "time=", "port=", "ignore-connections"])
     if len(opts) == 0:
         raise getopt.GetoptError("No input parameters!")
     for opt, arg in opts:
@@ -69,7 +71,7 @@ if missingConfiguration:
 
 
 def is_idle(last_activity):
-    last_activity = datetime.strptime(last_activity,"%Y-%m-%dT%H:%M:%S.%fz")
+    last_activity = datetime.strptime(last_activity, "%Y-%m-%dT%H:%M:%S.%fz")
     if (datetime.now() - last_activity).total_seconds() > time:
         return True
     else:
@@ -81,6 +83,7 @@ def get_notebook_name():
     with open(log_path, 'r') as logs:
         _logs = json.load(logs)
     return _logs['ResourceName']
+
 
 response = requests.get('https://localhost:'+port+'/api/sessions', verify=False)
 data = response.json()
@@ -106,4 +109,3 @@ if idle:
     client.stop_notebook_instance(
         NotebookInstanceName=get_notebook_name()
     )
-
