@@ -40,7 +40,6 @@ helpInfo = """-t, --time
 """
 
 # Read in command-line parameters
-idle = True
 port = '8443'
 ignore_connections = False
 try:
@@ -62,20 +61,14 @@ except getopt.GetoptError:
     exit(1)
 
 # Missing configuration notification
-missingConfiguration = False
 if not time:
     print("Missing '-t' or '--time'")
-    missingConfiguration = True
-if missingConfiguration:
     exit(2)
 
 
 def is_idle(last_activity):
     last_activity = datetime.strptime(last_activity, "%Y-%m-%dT%H:%M:%S.%fz")
-    if (datetime.now() - last_activity).total_seconds() > time:
-        return True
-    else:
-        return False
+    return (datetime.now() - last_activity).total_seconds() > time
 
 
 def get_notebook_name():
@@ -87,6 +80,7 @@ def get_notebook_name():
 
 response = requests.get('https://localhost:'+port+'/api/sessions', verify=False)
 data = response.json()
+idle = True
 if len(data) > 0:
     for notebook in data:
         if notebook['kernel']['execution_state'] == 'idle':
