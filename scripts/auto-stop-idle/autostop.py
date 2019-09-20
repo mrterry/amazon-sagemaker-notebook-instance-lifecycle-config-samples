@@ -96,7 +96,8 @@ if len(data) > 0:
         else:
             idle = False
 else:
-    idle = False
+    # a notebook server with no active notebooks is considered idle
+    idle = True
 
 if idle:
     client = boto3.client('sagemaker')
