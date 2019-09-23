@@ -21,7 +21,61 @@ import boto3
 import requests
 import urllib3
 
+log_token = None
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+with open('/opt/ml/metadata/resource-metadata.json') as logs:
+    nb_name = json.load(logs)['ResourceName']
+
+LOG_GROUP_NAME = '/aws/sagemaker/NotebookInstances'
+STREAM_NAME = '{nb_name}/LifecycleConfigOnStart'.format(nb_name=nb_name)
+LOGS_CLIENT = None
+
+
+def get_stream(resp):
+    for stream in resp['logStreams']:
+        if 'LifecycleConfigOnStart' in stream['logStreamName']:
+            return stream
+    raise Exception('no stream')
+
+
+def _get_client():
+    global LOGS_CLIENT
+    if LOGS_CLIENT is None:
+        LOGS_CLIENT = boto3.client('logs')
+    return LOGS_CLIENT
+
+
+def _get_token():
+    global log_token
+    if log_token is None:
+        client = _get_client()
+        resp = client.describe_log_streams(logGroupName=LOG_GROUP_NAME)
+        stream = get_stream(resp)
+        log_token = stream['uploadSequenceToken']
+    return log_token
+
+
+def _set_token(resp):
+    global log_token
+    log_token = resp['nextSequenceToken']
+
+
+def log(msg):
+    global log_token
+    timestamp = int(round(time.time() * 1000))
+
+    token = _get_token()
+    resp = client.put_log_events(
+        logGroupName=LOG_GROUP_NAME,
+        logStreamName=STREAM_NAME,
+        logEvents=[
+            {'timestamp': timestamp, 'message': msg},
+        ],
+        sequenceToken=token,
+    )
+    _set_token(resp)
+
 
 # Usage
 usageInfo = """Usage:
@@ -40,27 +94,6 @@ helpInfo = """-t, --time
     Help information
 """
 
-
-def log(msg):
-    nb_name = ''
-    log_group = '/aws/sagemaker/NotebookInstances'
-    stream_name = '{nb_name}/LifecycleConfigOnStart'.format(nb_name)
-    client = boto3.client('logs')
-    timestamp = int(round(time.time() * 1000))
-
-    resp = client.describe_log_streams(logGropuName=log_group)
-    next_seq_token = resp['logStreams'][0]['nextSequenceToken']
-
-    resp = client.put_log_events(
-        logGroupName=log_group,
-        logStreamName=stream_name,
-        log_events=[
-            {'timestamp': timestamp, 'message': msg},
-        ],
-        sequenceToken=next_seq_token,
-    )
-
-
 # Read in command-line parameters
 port = '8443'
 ignore_connections = False
@@ -71,7 +104,7 @@ try:
         raise getopt.GetoptError("No input parameters!")
     for opt, arg in opts:
         if opt in ("-h", "--help"):
-            print(helpInfo)
+            log(helpInfo)
             exit(0)
         if opt in ("-t", "--time"):
             max_idle_duration = int(arg)
@@ -80,50 +113,55 @@ try:
         if opt in ("-c", "--ignore-connections"):
             ignore_connections = True
 except getopt.GetoptError:
-    print(usageInfo)
+    log(usageInfo)
     exit(1)
 
 # Missing configuration notification
 if not max_idle_duration:
-    print("Missing '-t' or '--time'")
+    log("Missing '-t' or '--time'")
     exit(2)
 
 
-def is_idle(last_activity):
+def is_notebook_idle(last_activity):
     last_activity = datetime.strptime(last_activity, "%Y-%m-%dT%H:%M:%S.%fz")
     return (datetime.now() - last_activity).total_seconds() > max_idle_duration
 
 
-def get_notebook_name():
-    log_path = '/opt/ml/metadata/resource-metadata.json'
-    with open(log_path, 'r') as logs:
-        _logs = json.load(logs)
-    return _logs['ResourceName']
+idle_label = {True: 'idle', False: 'active'}
 
 
-response = requests.get('https://localhost:'+port+'/api/sessions', verify=False)
-data = response.json()
-idle = True
-if len(data) > 0:
-    for notebook in data:
-        if notebook['kernel']['execution_state'] == 'idle':
-            if not ignore_connections:
-                if notebook['kernel']['connections'] == 0:
-                    if not is_idle(notebook['kernel']['last_activity']):
-                        idle = False
-                else:
-                    idle = False
-            else:
-                if not is_idle(notebook['kernel']['last_activity']):
-                    idle = False
-        else:
-            idle = False
-else:
-    # a notebook server with no active notebooks is considered idle
-    idle = True
+def is_instance_idle(session):
+    name = session['path']  # TODO?
+    is_idle = False
+    if session['kernel']['execution_state'] == 'idle':
+        n_connections = session['kernel']['connections']
+        if ignore_connections or n_connections == 0:
+            is_idle = is_notebook_idle(session['kernel']['last_activity'])
+    state = idle_label[is_idle]
+    log('Notebook {name} is {state}'.format(name, state))
+    return is_idle
 
-if idle:
+
+def is_server_idle():
+    response = requests.get('https://localhost:'+port+'/api/sessions', verify=False)
+    sessions = response.json()
+    is_idle = True
+    n_sessions = len(sessions)
+    if n_sessions > 0:
+        n_idle = is_idle = sum(is_instance_idle(sess) for sess in sessions)
+        log('{n_idle}/{n_nb} notebooks are idle'.format(n_idle=n_idle, n_nb=len(sessions)))
+        is_idle = n_idle == len(sessions)
+    else:
+        # a notebook server with no active notebooks is considered idle
+        log('No active notebooks.')
+        is_idle = True
+    state = idle_label[is_idle]
+    log('Server is {state}'.format(state))
+    return is_idle
+
+
+if is_server_idle():
     client = boto3.client('sagemaker')
     client.stop_notebook_instance(
-        NotebookInstanceName=get_notebook_name()
+        NotebookInstanceName=nb_name,
     )
