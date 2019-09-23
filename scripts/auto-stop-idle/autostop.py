@@ -139,7 +139,7 @@ def is_instance_idle(session):
         if ignore_connections or n_connections == 0:
             is_idle = is_notebook_idle(session['kernel']['last_activity'])
     state = idle_label[is_idle]
-    log('Notebook {name} is {state}'.format(name, state))
+    log('Notebook {name} is {state}'.format(name=name, state=state))
     return is_idle
 
 
@@ -157,11 +157,12 @@ def is_server_idle():
         log('No active notebooks.')
         is_idle = True
     state = idle_label[is_idle]
-    log('Server is {state}'.format(state))
+    log('Server is {state}'.format(state=state))
     return is_idle
 
 
 if is_server_idle():
+    log('Server id idle.  Stopping')
     client = boto3.client('sagemaker')
     client.stop_notebook_instance(
         NotebookInstanceName=nb_name,
