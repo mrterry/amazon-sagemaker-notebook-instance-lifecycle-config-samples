@@ -66,6 +66,7 @@ def log(msg):
     timestamp = int(round(time.time() * 1000))
 
     token = _get_token()
+    client = _get_client()
     resp = client.put_log_events(
         logGroupName=LOG_GROUP_NAME,
         logStreamName=STREAM_NAME,
