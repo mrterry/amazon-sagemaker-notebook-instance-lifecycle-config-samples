@@ -14,6 +14,7 @@
 import getopt
 import json
 import sys
+import time
 from datetime import datetime
 
 import boto3
@@ -39,9 +40,31 @@ helpInfo = """-t, --time
     Help information
 """
 
+
+def log(msg):
+    nb_name = ''
+    log_group = '/aws/sagemaker/NotebookInstances'
+    stream_name = '{nb_name}/LifecycleConfigOnStart'.format(nb_name)
+    client = boto3.client('logs')
+    timestamp = int(round(time.time() * 1000))
+
+    resp = client.describe_log_streams(logGropuName=log_group)
+    next_seq_token = resp['logStreams'][0]['nextSequenceToken']
+
+    resp = client.put_log_events(
+        logGroupName=log_group,
+        logStreamName=stream_name,
+        log_events=[
+            {'timestamp': timestamp, 'message': msg},
+        ],
+        sequenceToken=next_seq_token,
+    )
+
+
 # Read in command-line parameters
 port = '8443'
 ignore_connections = False
+max_idle_duration = None
 try:
     opts, args = getopt.getopt(sys.argv[1:], "ht:p:c", ["help", "time=", "port=", "ignore-connections"])
     if len(opts) == 0:
@@ -51,7 +74,7 @@ try:
             print(helpInfo)
             exit(0)
         if opt in ("-t", "--time"):
-            time = int(arg)
+            max_idle_duration = int(arg)
         if opt in ("-p", "--port"):
             port = str(arg)
         if opt in ("-c", "--ignore-connections"):
@@ -61,14 +84,14 @@ except getopt.GetoptError:
     exit(1)
 
 # Missing configuration notification
-if not time:
+if not max_idle_duration:
     print("Missing '-t' or '--time'")
     exit(2)
 
 
 def is_idle(last_activity):
     last_activity = datetime.strptime(last_activity, "%Y-%m-%dT%H:%M:%S.%fz")
-    return (datetime.now() - last_activity).total_seconds() > time
+    return (datetime.now() - last_activity).total_seconds() > max_idle_duration
 
 
 def get_notebook_name():
