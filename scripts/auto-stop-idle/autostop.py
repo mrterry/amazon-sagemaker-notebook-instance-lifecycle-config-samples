@@ -30,6 +30,7 @@ with open('/opt/ml/metadata/resource-metadata.json') as logs:
 LOG_GROUP_NAME = '/aws/sagemaker/NotebookInstances'
 STREAM_NAME = '{nb_name}/LifecycleConfigOnStart'.format(nb_name=nb_name)
 LOGS_CLIENT = None
+MIN_UPTIME_S = 60*60
 
 
 def get_stream(resp):
@@ -143,7 +144,20 @@ def is_instance_idle(session):
     return is_idle
 
 
+def get_uptime():
+    with open('/proc/uptime', 'r') as f:
+        uptime_seconds = float(f.readline().split()[0])
+
+    return uptime_seconds
+
+
 def is_server_idle():
+    uptime = get_uptime()
+    if uptime < MIN_UPTIME_S:
+        log('Server must be active for at least 1 hour before shutting down.')
+        return False
+
+    # the server must be up for a least 1 hour before shutting down.
     response = requests.get('https://localhost:'+port+'/api/sessions', verify=False)
     sessions = response.json()
     is_idle = True
